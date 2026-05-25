@@ -26,31 +26,71 @@ import {
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
 const SKILL_BANK = [
-  'React',
-  'JavaScript',
-  'TypeScript',
-  'Node.js',
-  'Python',
-  'Java',
-  'C++',
-  'SQL',
-  'PostgreSQL',
-  'MongoDB',
-  'AWS',
-  'Docker',
-  'Kubernetes',
-  'GraphQL',
-  'REST',
-  'Machine Learning',
-  'Data Structures',
-  'System Design',
-  'CI/CD',
-  'Next.js',
-  'Express',
-  'Django',
-  'FastAPI',
-  'Redis',
-  'Terraform',
+  { label: 'React', aliases: ['react', 'react.js', 'reactjs'] },
+  { label: 'Angular', aliases: ['angular', 'angular.js'] },
+  { label: 'Vue.js', aliases: ['vue', 'vue.js', 'vuejs'] },
+  { label: 'JavaScript', aliases: ['javascript'] },
+  { label: 'TypeScript', aliases: ['typescript'] },
+  { label: 'Node.js', aliases: ['node.js', 'nodejs', 'node'] },
+  { label: 'Express.js', aliases: ['express.js', 'expressjs', 'express'] },
+  { label: 'Python', aliases: ['python'] },
+  { label: 'Java', aliases: ['java'] },
+  { label: 'C++', aliases: ['c++'] },
+  { label: 'C', aliases: [' c ', ' c,', ' c\n', ' c\r'] },
+  { label: 'Go', aliases: ['go', 'golang'] },
+  { label: 'PHP', aliases: ['php'] },
+  { label: 'Dart', aliases: ['dart'] },
+  { label: 'Kotlin', aliases: ['kotlin'] },
+  { label: 'SQL', aliases: ['sql'] },
+  { label: 'MySQL', aliases: ['mysql'] },
+  { label: 'PostgreSQL', aliases: ['postgresql', 'postgres'] },
+  { label: 'MongoDB', aliases: ['mongodb', 'mongo'] },
+  { label: 'NoSQL', aliases: ['nosql'] },
+  { label: 'Firebase', aliases: ['firebase', 'firestore'] },
+  { label: 'AWS', aliases: ['aws'] },
+  { label: 'GCP', aliases: ['gcp', 'google cloud'] },
+  { label: 'Azure', aliases: ['azure'] },
+  { label: 'Docker', aliases: ['docker'] },
+  { label: 'Kubernetes', aliases: ['kubernetes', 'k8s'] },
+  { label: 'Terraform', aliases: ['terraform'] },
+  { label: 'Jenkins', aliases: ['jenkins'] },
+  { label: 'GitHub Actions', aliases: ['github actions'] },
+  { label: 'ArgoCD', aliases: ['argocd'] },
+  { label: 'Argo Workflows', aliases: ['argo workflows'] },
+  { label: 'Grafana', aliases: ['grafana'] },
+  { label: 'Linux', aliases: ['linux'] },
+  { label: 'GraphQL', aliases: ['graphql'] },
+  { label: 'REST APIs', aliases: ['rest api', 'rest apis', 'rest'] },
+  { label: 'JWT', aliases: ['jwt'] },
+  { label: 'Socket.io', aliases: ['socket.io', 'socketio'] },
+  { label: 'Microservices', aliases: ['microservice', 'microservices'] },
+  { label: 'Spring Boot', aliases: ['spring boot'] },
+  { label: 'Django', aliases: ['django'] },
+  { label: 'Sanic', aliases: ['sanic'] },
+  { label: 'FastAPI', aliases: ['fastapi', 'fast api'] },
+  { label: 'Redis', aliases: ['redis'] },
+  { label: 'Flutter', aliases: ['flutter'] },
+  { label: 'HTML', aliases: ['html'] },
+  { label: 'CSS', aliases: ['css'] },
+  { label: 'Bootstrap', aliases: ['bootstrap'] },
+  { label: 'ETL Pipelines', aliases: ['etl pipeline', 'etl pipelines', 'etl'] },
+  { label: 'Data Structures & Algorithms', aliases: ['data structures', 'algorithms', 'dsa'] },
+  { label: 'OOP', aliases: ['oop', 'oops', 'object oriented'] },
+  { label: 'DBMS', aliases: ['dbms'] },
+  { label: 'Operating Systems', aliases: ['operating systems'] },
+  { label: 'Computer Networks', aliases: ['computer networks'] },
+  { label: 'Distributed Systems', aliases: ['distributed systems'] },
+  { label: 'Machine Learning', aliases: ['machine learning', 'ml'] },
+  { label: 'TensorFlow', aliases: ['tensorflow'] },
+  { label: 'OpenCV', aliases: ['opencv'] },
+  { label: 'NumPy', aliases: ['numpy'] },
+  { label: 'Pandas', aliases: ['pandas'] },
+  { label: 'Scikit-learn', aliases: ['scikit-learn', 'sklearn'] },
+  { label: 'Vertex AI', aliases: ['vertex ai'] },
+  { label: 'RAG', aliases: ['rag', 'retrieval augmented generation'] },
+  { label: 'NLP', aliases: ['nlp', 'natural language processing'] },
+  { label: 'TF-IDF', aliases: ['tf-idf', 'tfidf'] },
+  { label: 'System Design', aliases: ['system design'] },
 ]
 
 const ROLE_CATEGORIES = {
@@ -131,6 +171,8 @@ const SAMPLE_JOB = `Senior Full Stack Engineer
 We need a product-minded engineer with React, TypeScript, Node.js, PostgreSQL, AWS, REST APIs, CI/CD, testing practices, and strong ownership. Bonus for system design, Redis, Docker and mentoring experience.`
 
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
+const GEMINI_MODEL = import.meta.env.VITE_GEMINI_MODEL || 'gemini-2.5-flash'
+const GEMINI_THINKING_BUDGET = Number(import.meta.env.VITE_GEMINI_THINKING_BUDGET ?? 0)
 
 const extractUrls = (text) => {
   const links = text.match(/https?:\/\/[^\s),\]}>"']+/gi) || []
@@ -154,8 +196,10 @@ const extractLeetcodeHandle = (urlOrHandle) => {
 }
 
 const getSkills = (text) => {
-  const normalized = text.toLowerCase()
-  return SKILL_BANK.filter((skill) => normalized.includes(skill.toLowerCase()))
+  const normalized = ` ${text.toLowerCase().replace(/[^\w+#.-]+/g, ' ')} `
+  return SKILL_BANK.filter((skill) =>
+    skill.aliases.some((alias) => normalized.includes(` ${alias.toLowerCase()} `))
+  ).map((skill) => skill.label)
 }
 
 const countCategorySignals = (text, category) => {
@@ -403,11 +447,14 @@ ${jobText ? jobText.slice(0, 2500) : 'No job description provided.'}
 
 const fetchGeminiNarrative = async ({ candidateName, assessment, github, repos, leetcode, resumeText, jobText }) => {
   if (!GEMINI_API_KEY || GEMINI_API_KEY === 'replace_with_your_gemini_api_key') {
+    console.info('[Gemini] Skipped: VITE_GEMINI_API_KEY is not configured.')
     return null
   }
 
+  console.info('[Gemini] Request started.')
+  console.info('[Gemini] Model:', GEMINI_MODEL)
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
     {
       method: 'POST',
       headers: {
@@ -433,18 +480,27 @@ const fetchGeminiNarrative = async ({ candidateName, assessment, github, repos, 
         ],
         generationConfig: {
           temperature: 0.35,
-          maxOutputTokens: 550,
+          maxOutputTokens: 1600,
+          thinkingConfig: {
+            thinkingBudget: GEMINI_THINKING_BUDGET,
+          },
         },
       }),
     }
   )
 
+  console.info('[Gemini] Response status:', response.status, response.statusText)
+
   if (!response.ok) {
+    const errorText = await response.text()
+    console.warn('[Gemini] Request failed:', errorText.slice(0, 500))
     throw new Error('Gemini request failed')
   }
 
   const payload = await response.json()
-  return payload.candidates?.[0]?.content?.parts?.map((part) => part.text).join('\n').trim() || null
+  const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text).join('\n').trim() || null
+  console.info('[Gemini] Text generated:', Boolean(text), text ? `${text.length} characters` : 'no text')
+  return text
 }
 
 const getBriefHighlights = (assessment) => {
@@ -455,6 +511,39 @@ const getBriefHighlights = (assessment) => {
     `${assessment.candidateSkills.length} skills detected`,
     assessment.jobSkills.length ? `${assessment.matchedJobSkills.length}/${assessment.jobSkills.length} job fit` : 'No job JD added',
   ]
+}
+
+const renderInlineMarkdown = (text) =>
+  text.split(/(\*\*[^*]+\*\*)/g).map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>
+    }
+    return part
+  })
+
+function CandidateBrief({ text }) {
+  const blocks = text
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  return (
+    <div className="max-w-3xl space-y-4 text-sm leading-7 text-stone-700">
+      {blocks.map((block, index) => {
+        const bullet = block.match(/^[-*]\s+(.*)$/)
+        if (bullet) {
+          return (
+            <div key={index} className="flex gap-3 rounded-lg bg-stone-50 px-4 py-3">
+              <span className="mt-2 h-1.5 w-1.5 flex-none rounded-full bg-emerald-700" />
+              <p>{renderInlineMarkdown(bullet[1])}</p>
+            </div>
+          )
+        }
+
+        return <p key={index}>{renderInlineMarkdown(block)}</p>
+      })}
+    </div>
+  )
 }
 
 function App() {
@@ -598,6 +687,7 @@ function App() {
       })
       let geminiNarrative = null
       try {
+        console.info('[Analyze] Calling Gemini for recruiter brief.')
         geminiNarrative = await fetchGeminiNarrative({
           candidateName,
           assessment: nextAssessment,
@@ -608,6 +698,7 @@ function App() {
           jobText,
         })
       } catch {
+        console.warn('[Analyze] Gemini failed. Falling back to local recruiter brief.')
         setError('Gemini summary failed, so the app used the local recruiter brief instead.')
       }
       setAnalysis({
@@ -825,7 +916,7 @@ function App() {
               <Sparkles className="h-5 w-5 text-emerald-700" />
               <h3 className="text-xl font-bold">{analysis?.narrativeSource === 'Gemini' ? 'Gemini candidate brief' : 'AI-style candidate brief'}</h3>
             </div>
-            <p className="max-w-3xl whitespace-pre-line text-sm leading-7 text-stone-700">{displayedNarrative}</p>
+            <CandidateBrief text={displayedNarrative} />
           </div>
 
           <div className="grid gap-6 xl:grid-cols-2">
