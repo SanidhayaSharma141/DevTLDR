@@ -1,606 +1,956 @@
 import { useMemo, useState } from 'react'
+import * as pdfjsLib from 'pdfjs-dist'
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url'
+import mammoth from 'mammoth/mammoth.browser'
 import {
-  Loader2,
-  Github,
-  Terminal,
-  Sparkles,
-  CheckCircle2,
   AlertTriangle,
-  Link2,
-  ArrowRight,
+  BadgeCheck,
+  BarChart3,
+  BrainCircuit,
+  BriefcaseBusiness,
+  CheckCircle2,
+  ChevronRight,
+  ClipboardCheck,
   Code2,
+  FileText,
+  Github,
+  Globe2,
   Linkedin,
+  Loader2,
+  Paperclip,
+  ShieldCheck,
+  Sparkles,
+  UploadCloud,
 } from 'lucide-react'
 
-const KEYWORDS = [
-  'Kubernetes',
-  'Docker',
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
+
+const SKILL_BANK = [
   'React',
-  'AWS',
-  'CI/CD',
-  'Machine Learning',
-  'Django',
-  'GraphQL',
+  'JavaScript',
   'TypeScript',
   'Node.js',
+  'Python',
+  'Java',
+  'C++',
   'SQL',
-  'Terraform',
-  'Microservices',
-  'Serverless',
+  'PostgreSQL',
+  'MongoDB',
+  'AWS',
+  'Docker',
+  'Kubernetes',
+  'GraphQL',
+  'REST',
+  'Machine Learning',
+  'Data Structures',
+  'System Design',
+  'CI/CD',
+  'Next.js',
+  'Express',
+  'Django',
   'FastAPI',
   'Redis',
-  'PostgreSQL',
+  'Terraform',
 ]
 
-const LANGUAGE_COLOR = {
-  TypeScript: '#3178c6',
-  JavaScript: '#f7df1e',
-  Python: '#3572A5',
-  Go: '#00ADD8',
-  Java: '#b07219',
-  Ruby: '#cc342d',
-  HCL: '#7b42f6',
-  YAML: '#ff5722',
-  default: '#8b5cf6',
+const ROLE_CATEGORIES = {
+  technical: [
+    'software',
+    'engineer',
+    'developer',
+    'backend',
+    'frontend',
+    'full stack',
+    'full-stack',
+    'api',
+    'microservices',
+    'cloud',
+    'devops',
+    'data',
+    'machine learning',
+    'etl',
+    'database',
+    'kubernetes',
+    'docker',
+    'python',
+    'java',
+    'javascript',
+    'react',
+  ],
+  hospitality: [
+    'hospitality',
+    'venue',
+    'guest',
+    'front-of-house',
+    'front desk',
+    'customer complaints',
+    'event setup',
+    'catering',
+    'cleaning',
+    'facility',
+    'facilities',
+    'maintenance',
+    'inventory',
+    'vendor',
+    'physical stamina',
+    'floor',
+    'public-facing',
+    'check-in',
+    'retail',
+    'hotel',
+  ],
+  operations: [
+    'operations',
+    'coordinator',
+    'logistics',
+    'supplier',
+    'vendor management',
+    'inventory',
+    'schedule',
+    'coordination',
+  ],
 }
 
-const getLanguageColor = (language) => LANGUAGE_COLOR[language] || LANGUAGE_COLOR.default
+const SAMPLE_RESUME = `Aarav Mehta
+Full Stack Engineer
+Email: aarav@example.com
+LinkedIn: https://linkedin.com/in/aarav-mehta
+GitHub: https://github.com/gaearon
+LeetCode: https://leetcode.com/problemset
 
-const parseLeetcodePayload = (payload) => {
-  if (!payload || typeof payload !== 'object') {
-    return null
+Experience
+Built React, Node.js, PostgreSQL and AWS products for B2B SaaS teams. Led dashboard performance work, designed REST APIs, owned Docker based deployments and mentored junior developers.
+
+Projects
+Candidate analytics platform with React, TypeScript, FastAPI, PostgreSQL and Redis. Real time collaboration tool with WebSocket architecture.
+
+Education
+B.Tech Computer Science`
+
+const SAMPLE_JOB = `Senior Full Stack Engineer
+We need a product-minded engineer with React, TypeScript, Node.js, PostgreSQL, AWS, REST APIs, CI/CD, testing practices, and strong ownership. Bonus for system design, Redis, Docker and mentoring experience.`
+
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
+
+const extractUrls = (text) => {
+  const links = text.match(/https?:\/\/[^\s),\]}>"']+/gi) || []
+  return {
+    linkedin: links.find((url) => url.toLowerCase().includes('linkedin.com')) || '',
+    github: links.find((url) => url.toLowerCase().includes('github.com')) || '',
+    leetcode: links.find((url) => url.toLowerCase().includes('leetcode.com')) || '',
   }
+}
 
-  const totalSolved = payload.totalSolved ?? payload.totalSolvedCount ?? 0
-  const easySolved = payload.easySolved ?? payload.easySolvedCount ?? 0
-  const mediumSolved = payload.mediumSolved ?? payload.mediumSolvedCount ?? 0
-  const hardSolved = payload.hardSolved ?? payload.hardSolvedCount ?? 0
+const extractGithubHandle = (urlOrHandle) => {
+  const value = urlOrHandle.trim()
+  const match = value.match(/github\.com\/([^/?#\s]+)/i)
+  return match?.[1] || value.replace('@', '')
+}
 
-  if (!totalSolved && !easySolved && !mediumSolved && !hardSolved) {
-    return null
+const extractLeetcodeHandle = (urlOrHandle) => {
+  const value = urlOrHandle.trim()
+  const match = value.match(/leetcode\.com\/(?:u\/)?([^/?#\s]+)/i)
+  return match?.[1] || value.replace('@', '')
+}
+
+const getSkills = (text) => {
+  const normalized = text.toLowerCase()
+  return SKILL_BANK.filter((skill) => normalized.includes(skill.toLowerCase()))
+}
+
+const countCategorySignals = (text, category) => {
+  const normalized = text.toLowerCase()
+  return ROLE_CATEGORIES[category].filter((signal) => normalized.includes(signal)).length
+}
+
+const getRoleCategory = (text) => {
+  const scores = Object.keys(ROLE_CATEGORIES).map((category) => ({
+    category,
+    score: countCategorySignals(text, category),
+  }))
+  const best = scores.sort((a, b) => b.score - a.score)[0]
+  return best.score ? best.category : 'general'
+}
+
+const getCandidateName = (text) => {
+  const cleanedLines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !/^(https?:|tel:|mailto:)/i.test(line))
+
+  const explicitNameLine = cleanedLines.find((line) => {
+    if (line.length > 80) return false
+    if (/[|@]/.test(line)) return false
+    if (/\b(education|experience|skills|projects|engineer|developer|intern)\b/i.test(line)) return false
+    return /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}$/.test(line)
+  })
+
+  if (explicitNameLine) return explicitNameLine
+
+  const openingText = cleanedLines.join(' ').slice(0, 180)
+  const beforeContact = openingText
+    .split(/\b(?:hyderabad|bengaluru|bangalore|delhi|mumbai|pune|india|email|linkedin|github|leetcode|education)\b/i)[0]
+    .replace(/[^\w\s.'-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  const nameMatch = beforeContact.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})/)
+  if (nameMatch) return nameMatch[1]
+
+  return 'Candidate'
+}
+
+const unique = (values) => [...new Set(values.filter(Boolean))]
+
+const clamp = (value) => Math.min(100, Math.max(0, value))
+
+const readFileAsText = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = reject
+    reader.readAsText(file)
+  })
+
+const readFileAsArrayBuffer = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = reject
+    reader.readAsArrayBuffer(file)
+  })
+
+const parsePdf = async (file) => {
+  const buffer = await readFileAsArrayBuffer(file)
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise
+  const pageTexts = await Promise.all(
+    Array.from({ length: pdf.numPages }, async (_, index) => {
+      const page = await pdf.getPage(index + 1)
+      const content = await page.getTextContent()
+      const annotations = await page.getAnnotations()
+      const links = annotations
+        .map((annotation) => annotation.url || annotation.unsafeUrl)
+        .filter(Boolean)
+      return `${content.items.map((item) => item.str).join(' ')}\n${links.join('\n')}`
+    })
+  )
+  return pageTexts.join('\n\n')
+}
+
+const parseDocx = async (file) => {
+  const buffer = await readFileAsArrayBuffer(file)
+  const [rawResult, htmlResult] = await Promise.all([
+    mammoth.extractRawText({ arrayBuffer: buffer.slice(0) }),
+    mammoth.convertToHtml({ arrayBuffer: buffer.slice(0) }),
+  ])
+  const hyperlinkTargets = unique(
+    Array.from(htmlResult.value.matchAll(/href="([^"]+)"/gi)).map((match) => match[1])
+  )
+  return `${rawResult.value}\n\n${hyperlinkTargets.join('\n')}`
+}
+
+const parseResumeFile = async (file) => {
+  const name = file.name.toLowerCase()
+  if (file.type === 'application/pdf' || name.endsWith('.pdf')) {
+    return parsePdf(file)
   }
+  if (
+    file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    name.endsWith('.docx')
+  ) {
+    return parseDocx(file)
+  }
+  if (name.endsWith('.doc')) {
+    throw new Error('Legacy .doc files are not supported in the browser. Please upload .docx, .pdf, or paste the text.')
+  }
+  return readFileAsText(file)
+}
+
+const calculateAssessment = ({ resumeText, github, repos, leetcode, jobText }) => {
+  const candidateSkills = getSkills(resumeText)
+  const jobSkills = getSkills(jobText)
+  const matchedJobSkills = jobSkills.filter((skill) => candidateSkills.includes(skill))
+  const resumeCategory = getRoleCategory(resumeText)
+  const jobCategory = jobText.trim() ? getRoleCategory(jobText) : 'general'
+  const hasJob = Boolean(jobText.trim())
+  const categoryCompatible =
+    !hasJob ||
+    jobCategory === 'general' ||
+    resumeCategory === jobCategory ||
+    (resumeCategory === 'technical' && jobCategory === 'operations' && countCategorySignals(jobText, 'technical') > 2)
+  const categoryPenalty = hasJob && !categoryCompatible ? 42 : 0
+  const resumeScore = resumeText.trim() ? 24 : 0
+  const skillScore = Math.min(candidateSkills.length * 4, 28)
+  const githubScore = github ? Math.min(18, 8 + Math.floor((github.public_repos || repos.length) / 3)) : 0
+  const leetcodeScore = leetcode ? Math.min(12, Math.floor((leetcode.totalSolved || 0) / 25) + 4) : 0
+  const jobScore = hasJob
+    ? categoryCompatible
+      ? Math.round((matchedJobSkills.length / Math.max(jobSkills.length, 1)) * 18)
+      : 0
+    : 8
+  const score = clamp(resumeScore + skillScore + githubScore + leetcodeScore + jobScore - categoryPenalty)
+  const recommendation =
+    hasJob && !categoryCompatible
+      ? 'Not a role fit'
+      : score >= 78
+        ? 'Strong proceed'
+        : score >= 58
+          ? 'Proceed with focused screen'
+          : 'Hold for manual review'
 
   return {
-    totalSolved: totalSolved || easySolved + mediumSolved + hardSolved,
-    easySolved,
-    mediumSolved,
-    hardSolved,
+    score,
+    recommendation,
+    candidateSkills,
+    jobSkills,
+    matchedJobSkills,
+    resumeCategory,
+    jobCategory,
+    categoryCompatible,
+    risks: [
+      hasJob && !categoryCompatible && `Role mismatch: resume appears ${resumeCategory}, while the job appears ${jobCategory}.`,
+      !github && 'GitHub evidence is missing or unavailable.',
+      !leetcode && 'LeetCode signal is not verified.',
+      candidateSkills.length < 5 && 'Resume has limited explicit skill density.',
+      jobSkills.length > 0 && matchedJobSkills.length < Math.ceil(jobSkills.length / 2) && 'Job match is below the ideal threshold.',
+    ].filter(Boolean),
+    strengths: [
+      candidateSkills.length >= 6 && !hasJob && 'Broad technical skill coverage across the resume.',
+      candidateSkills.length >= 6 && hasJob && categoryCompatible && 'Broad technical skill coverage aligns with the supplied role.',
+      github && `${github.public_repos || repos.length} public repositories add portfolio evidence.`,
+      leetcode && `${leetcode.totalSolved} solved problems support problem-solving depth.`,
+      matchedJobSkills.length >= 4 && 'Candidate maps well to the target job requirements.',
+    ].filter(Boolean),
   }
+}
+
+const inferRole = (resumeText, skills) => {
+  const lower = resumeText.toLowerCase()
+  if (lower.includes('data scientist') || lower.includes('machine learning')) return 'machine learning / data candidate'
+  if (lower.includes('frontend') || skills.some((skill) => ['React', 'Next.js', 'TypeScript'].includes(skill))) return 'frontend or full-stack candidate'
+  if (lower.includes('backend') || skills.some((skill) => ['Node.js', 'FastAPI', 'Django', 'PostgreSQL'].includes(skill))) return 'backend or full-stack candidate'
+  return 'software engineering candidate'
+}
+
+const buildCandidateNarrative = ({ candidateName, assessment, github, leetcode, resumeText }) => {
+  if (!assessment) {
+    return 'Run analysis to get recruiter-facing guidance on whether to proceed, what evidence to trust, what risks to probe, and which interview questions to ask first.'
+  }
+
+  const role = inferRole(resumeText, assessment.candidateSkills)
+  const topSkills = assessment.candidateSkills.slice(0, 6)
+  const skills = topSkills.join(', ') || 'general software delivery'
+  const missingJobSkills = assessment.jobSkills.filter((skill) => !assessment.matchedJobSkills.includes(skill))
+  const jobFit = assessment.jobSkills.length
+    ? `Role fit is ${assessment.matchedJobSkills.length}/${assessment.jobSkills.length} tracked requirements, so the screen should focus on the missing requirements rather than re-checking the obvious matches.`
+    : 'No job description was added, so this is a general candidate-quality read rather than a role-specific recommendation.'
+  const profileEvidence = [
+    github && `${github.public_repos || 0} public GitHub repositories`,
+    leetcode && `${leetcode.totalSolved} LeetCode problems`,
+  ].filter(Boolean)
+
+  const proceedAdvice =
+    assessment.recommendation === 'Not a role fit'
+      ? 'Do not move this candidate forward for this specific role. The candidate may be strong, but the supplied job is materially different from the resume evidence.'
+      : assessment.score >= 78
+        ? 'You should consider moving this candidate forward to the next technical screening step.'
+        : assessment.score >= 58
+          ? 'You can consider this candidate, but only with a focused recruiter screen before committing technical interview time.'
+          : 'You should not prioritize this candidate yet unless the role has flexibility or there is missing context outside the resume.'
+  const roleMismatchNote = assessment.categoryCompatible
+    ? ''
+    : ` The main issue is role mismatch: the resume reads as ${assessment.resumeCategory}, while the job reads as ${assessment.jobCategory}.`
+
+  return `Recommendation: ${assessment.recommendation.toLowerCase()} for ${candidateName}, with a confidence score of ${assessment.score}/100. ${proceedAdvice}${roleMismatchNote} The analyzed profile shows strongest visible evidence around ${skills}, placing the candidate closest to a ${role}. A strong general engineering profile should not be treated as a strong match when the supplied role is non-technical or operational.
+
+The strongest candidate signals are the breadth of backend/full-stack skills, production-oriented experience, and external coding evidence${profileEvidence.length ? ` (${profileEvidence.join(' and ')})` : ''}. ${jobFit} ${assessment.categoryCompatible ? (missingJobSkills.length ? `The main concern is the weaker evidence around ${missingJobSkills.slice(0, 8).join(', ')}, so those areas should decide whether the candidate is a true fit.` : 'There are no major tracked skill gaps against the supplied job description, so the decision should depend more on depth, ownership, and communication quality.') : 'For this job, those strengths do not translate into core fit because the role requires hospitality, physical venue operations, customer-facing coordination, facilities handling, and manual vendor/logistics work rather than software engineering.'}
+
+Suggested decision: ${assessment.categoryCompatible ? 'proceed if the role needs a hands-on engineer who can work across services, APIs, infrastructure, and product-facing delivery' : 'reject or redirect this candidate for this specific hospitality/venue role, and consider them only for software engineering roles'}. During any follow-up, validate the role alignment first. If the hiring need is truly on-site hospitality operations, this resume does not show the right evidence. If the hiring need changes to a technical product or platform role, then the candidate becomes worth screening.`
+}
+
+const buildGeminiPrompt = ({ candidateName, assessment, github, repos, leetcode, resumeText, jobText }) => `
+You are an expert technical recruiter. Write a concise but useful candidate assessment.
+
+Rules:
+- Do not repeat the resume.
+- Do not invent facts.
+- Address the recruiter directly as "you".
+- Make the output practical hiring advice for the recruiter using this app.
+- Include proceed/no-proceed reasoning and what to verify before moving forward.
+- Mention key strengths, risks, role fit, and interview probes.
+- Write around 400 words.
+- Use 3 short paragraphs followed by 4 recruiter action bullets.
+- Do not mention API keys, environment variables, prompts, or implementation details.
+- Do not write a generic candidate biography.
+
+Candidate name: ${candidateName}
+Score: ${assessment.score}/100
+Recommendation: ${assessment.recommendation}
+Detected skills: ${assessment.candidateSkills.join(', ') || 'None'}
+Matched job skills: ${assessment.matchedJobSkills.join(', ') || 'None'}
+Missing tracked job skills: ${assessment.jobSkills.filter((skill) => !assessment.matchedJobSkills.includes(skill)).join(', ') || 'None'}
+GitHub: ${github ? `${github.public_repos || 0} public repos, ${github.followers || 0} followers` : 'Not verified'}
+Recent repository names: ${repos.slice(0, 8).map((repo) => repo.name).join(', ') || 'None'}
+LeetCode: ${leetcode ? `${leetcode.totalSolved} total solved, ${leetcode.mediumSolved} medium, ${leetcode.hardSolved} hard` : 'Not verified'}
+
+Resume excerpt:
+${resumeText.slice(0, 4500)}
+
+Job description excerpt:
+${jobText ? jobText.slice(0, 2500) : 'No job description provided.'}
+`
+
+const fetchGeminiNarrative = async ({ candidateName, assessment, github, repos, leetcode, resumeText, jobText }) => {
+  if (!GEMINI_API_KEY || GEMINI_API_KEY === 'replace_with_your_gemini_api_key') {
+    return null
+  }
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: buildGeminiPrompt({
+                  candidateName,
+                  assessment,
+                  github,
+                  repos,
+                  leetcode,
+                  resumeText,
+                  jobText,
+                }),
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.35,
+          maxOutputTokens: 550,
+        },
+      }),
+    }
+  )
+
+  if (!response.ok) {
+    throw new Error('Gemini request failed')
+  }
+
+  const payload = await response.json()
+  return payload.candidates?.[0]?.content?.parts?.map((part) => part.text).join('\n').trim() || null
+}
+
+const getBriefHighlights = (assessment) => {
+  if (!assessment) return ['No completed analysis yet', 'Score locked until Analyze', 'Job match optional']
+
+  return [
+    assessment.recommendation,
+    `${assessment.candidateSkills.length} skills detected`,
+    assessment.jobSkills.length ? `${assessment.matchedJobSkills.length}/${assessment.jobSkills.length} job fit` : 'No job JD added',
+  ]
 }
 
 function App() {
-  // Separate states for distinct platform profiles
+  const [resumeText, setResumeText] = useState(() => localStorage.getItem('candidate_resume') || '')
+  const [fileName, setFileName] = useState('')
   const [githubHandle, setGithubHandle] = useState('')
-  const [leetcodeHandle, setLeetcodeHandle] = useState('')
   const [linkedinUrl, setLinkedinUrl] = useState('')
-  const [aboutText, setAboutText] = useState('')
-  
-  const [showHighlights, setShowHighlights] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  
-  const [profile, setProfile] = useState(null)
+  const [leetcodeHandle, setLeetcodeHandle] = useState('')
+  const [jobText, setJobText] = useState('')
+  const [jobFileName, setJobFileName] = useState('')
+  const [github, setGithub] = useState(null)
   const [repos, setRepos] = useState([])
   const [leetcode, setLeetcode] = useState(null)
+  const [analysis, setAnalysis] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [status, setStatus] = useState('')
+  const [error, setError] = useState('')
 
-  const keywords = useMemo(() => {
-    if (!aboutText.trim()) return []
-    const normalized = aboutText.toLowerCase()
-    return KEYWORDS.filter((keyword) => normalized.includes(keyword.toLowerCase()))
-  }, [aboutText])
+  const detectedLinks = useMemo(() => extractUrls(resumeText), [resumeText])
+  const liveCandidateSkills = useMemo(() => getSkills(resumeText), [resumeText])
+  const assessment = analysis?.assessment || null
+  const candidateSkills = assessment?.candidateSkills || []
+  const jobSkills = assessment?.jobSkills || []
+  const matchedJobSkills = assessment?.matchedJobSkills || []
 
-  const languageDistribution = useMemo(() => {
-    const count = repos.reduce((acc, repo) => {
-      if (!repo.language) return acc
-      acc[repo.language] = (acc[repo.language] || 0) + 1
-      return acc
-    }, {})
-
-    const total = Object.values(count).reduce((sum, value) => sum + value, 0)
-
-    return Object.entries(count)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([language, value]) => ({
-        language,
-        percentage: total ? Math.round((value / total) * 100) : 0,
-        color: getLanguageColor(language),
-      }))
-  }, [repos])
-
-  const totalStars = useMemo(
-    () => repos.reduce((sum, repo) => sum + (repo.stargazers_count || 0), 0),
-    [repos]
-  )
-
-  const totalForks = useMemo(
-    () => repos.reduce((sum, repo) => sum + (repo.forks_count || 0), 0),
-    [repos]
-  )
-
-  const topRepos = useMemo(
-    () =>
-      [...repos]
-        .sort((a, b) => {
-          const starsA = a.stargazers_count || 0
-          const starsB = b.stargazers_count || 0
-          if (starsA !== starsB) return starsB - starsA
-          return new Date(b.updated_at) - new Date(a.updated_at)
-        })
-        .slice(0, 3),
-    [repos]
-  )
-
-  const skillClassification = useMemo(() => {
-    const counts = repos.reduce((acc, repo) => {
-      if (!repo.language) return acc
-      const language = repo.language
-      acc[language] = (acc[language] || 0) + 1
-      return acc
-    }, {})
-
-    const total = Object.values(counts).reduce((sum, value) => sum + value, 0)
-    const jsCount = (counts.JavaScript || 0) + (counts.TypeScript || 0)
-    const pyCount = counts.Python || 0
-    const goCount = counts.Go || 0
-    const backendTotal = pyCount + goCount
-
-    if (!total) {
-      return 'Versatile Software Developer'
-    }
-
-    if (jsCount / total > 0.5) {
-      return 'Frontend / Full-stack Specialist'
-    }
-
-    if (backendTotal / total > 0.45) {
-      return 'Backend / Systems Architect'
-    }
-
-    return 'Versatile Software Engineer'
-  }, [repos])
-
-  const problemSolverBadge = useMemo(() => {
-    if (!leetcode) return null
-    if (leetcode.hardSolved > 30) return 'Deep Algorithmic Focus'
-    if (leetcode.totalSolved > 300) return 'Strong Problem Solver'
-    return null
-  }, [leetcode])
-
-  const activeContributor = useMemo(() => {
-    const activeRepoCount = repos.filter((repo) => {
-      const stars = repo.stargazers_count || 0
-      const updatedAt = new Date(repo.updated_at)
-      const recentlyUpdated = updatedAt > new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
-      return stars > 2 || recentlyUpdated
-    }).length
-
-    if (activeRepoCount >= 5) return 'Active Open-Source Contributor'
-    if (activeRepoCount >= 2) return 'Reliable GitHub Maintainer'
-    return 'Emerging GitHub Contributor'
-  }, [repos])
-
-  const summaryBullets = useMemo(() => {
-    const bullets = []
-    bullets.push(`Classified as ${skillClassification} based on repository language mix.`)
-
-    if (problemSolverBadge) {
-      bullets.push(`Problem skills flagged: ${problemSolverBadge}.`)
-    } else if (leetcode) {
-      bullets.push('Problem solving shows solid volume with a balanced LeetCode portfolio.')
-    } else {
-      bullets.push('LeetCode profile not loaded; recruiter summary may be incomplete.')
-    }
-
-    bullets.push(`${activeContributor} with ${repos.length} public repositories and an active contribution pulse.`)
-    return bullets
-  }, [skillClassification, problemSolverBadge, leetcode, activeContributor, repos.length])
-
-  const handleAnalyzeProfile = async (event) => {
-    event.preventDefault()
-    
-    if (!githubHandle.trim() && !leetcodeHandle.trim()) {
-      setError('Please provide at least a GitHub or LeetCode handle to analyze.')
-      return
-    }
-
-    setError('')
-    setLoading(true)
-
-    // Reset current telemetry display before fetching fresh data
-    setProfile(null)
-    setRepos([])
-    setLeetcode(null)
-
-    // 1. GitHub Data Fetch Stream
-    if (githubHandle.trim()) {
-      try {
-        const userResponse = await fetch(`https://api.github.com/users/${encodeURIComponent(githubHandle.trim())}`)
-        if (!userResponse.ok) {
-          if (userResponse.status === 404) throw new Error('GitHub profile not found.')
-          throw new Error('GitHub profile fetch failed.')
-        }
-
-        const repoResponse = await fetch(`https://api.github.com/users/${encodeURIComponent(githubHandle.trim())}/repos?per_page=100`)
-        if (!repoResponse.ok) throw new Error('Unable to fetch GitHub repositories.')
-
-        const [userData, repoData] = await Promise.all([userResponse.json(), repoResponse.json()])
-
-        setProfile({
-          login: userData.login,
-          name: userData.name || userData.login,
-          avatar_url: userData.avatar_url,
-          bio: userData.bio,
-          company: userData.company,
-          location: userData.location,
-          blog: userData.blog,
-          html_url: userData.html_url,
-          followers: userData.followers,
-          public_repos: userData.public_repos,
-        })
-
-        setRepos(repoData.map((repo) => ({
-          id: repo.id,
-          name: repo.name,
-          description: repo.description,
-          language: repo.language,
-          stargazers_count: repo.stargazers_count,
-          forks_count: repo.forks_count,
-          updated_at: repo.updated_at,
-          html_url: repo.html_url,
-        })))
-      } catch (githubError) {
-        setError(githubError.message)
-      }
-    }
-
-    // 2. LeetCode Data Fetch Stream
-    if (leetcodeHandle.trim()) {
-      try {
-        const leetResponse = await fetch(`https://leetcode-api-faisalshohag.vercel.app/${encodeURIComponent(leetcodeHandle.trim())}`)
-        if (!leetResponse.ok) throw new Error('LeetCode metrics unavailable.')
-
-        const leetPayload = await leetResponse.json()
-        const parsed = parseLeetcodePayload(leetPayload)
-        if (!parsed) throw new Error('LeetCode payload format not recognized.')
-        
-        setLeetcode(parsed)
-      } catch (leetError) {
-        setError((prev) => (prev ? `${prev} | LeetCode details unavailable.` : 'LeetCode details unavailable.'))
-      }
-    }
-
-    setLoading(false)
+  const hydrateFromResume = (text) => {
+    const links = extractUrls(text)
+    if (links.github) setGithubHandle(extractGithubHandle(links.github))
+    if (links.linkedin) setLinkedinUrl(links.linkedin)
+    if (links.leetcode) setLeetcodeHandle(extractLeetcodeHandle(links.leetcode))
   }
 
+  const handleFile = async (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setError('')
+    setStatus('Parsing resume and saving candidate content...')
+    setFileName(file.name)
+
+    try {
+      const text = await parseResumeFile(file)
+      if (!text.trim()) {
+        throw new Error('No readable text was found in this resume.')
+      }
+      setResumeText(text)
+      localStorage.setItem('candidate_resume', text)
+      hydrateFromResume(text)
+      setAnalysis(null)
+      setStatus('Resume parsed and stored. Click Analyze candidate to refresh the score.')
+    } catch (parseError) {
+      setError(parseError.message || 'Could not read this file. Please upload a text-based PDF, DOCX, TXT, or paste the resume content.')
+      setStatus('')
+    }
+  }
+
+  const handleJobFile = async (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setError('')
+    setStatus('Parsing job description file...')
+    setJobFileName(file.name)
+
+    try {
+      const text = await parseResumeFile(file)
+      if (!text.trim()) {
+        throw new Error('No readable text was found in this job file.')
+      }
+      setJobText(text)
+      setAnalysis(null)
+      setStatus('Job description parsed. Click Analyze candidate to refresh fit scoring.')
+    } catch (parseError) {
+      setError(parseError.message || 'Could not read this job file. Upload PDF, DOCX, TXT, or paste the job description.')
+      setStatus('')
+    }
+  }
+
+  const fetchLeetcode = async (handle) => {
+    const response = await fetch(`https://leetcode-api-faisalshohag.vercel.app/${encodeURIComponent(handle)}`)
+    if (!response.ok) throw new Error('LeetCode fetch failed')
+    const data = await response.json()
+    const totalSolved = data.totalSolved ?? data.totalSolvedCount ?? 0
+    return {
+      totalSolved,
+      easySolved: data.easySolved ?? data.easySolvedCount ?? 0,
+      mediumSolved: data.mediumSolved ?? data.mediumSolvedCount ?? 0,
+      hardSolved: data.hardSolved ?? data.hardSolvedCount ?? 0,
+    }
+  }
+
+  const analyzeCandidate = async () => {
+    setLoading(true)
+    setError('')
+    setStatus('Enriching candidate profile...')
+    setGithub(null)
+    setRepos([])
+    setLeetcode(null)
+    setAnalysis(null)
+
+    const gh = githubHandle || (detectedLinks.github && extractGithubHandle(detectedLinks.github))
+    const lc = leetcodeHandle || (detectedLinks.leetcode && extractLeetcodeHandle(detectedLinks.leetcode))
+    let nextGithub = null
+    let nextRepos = []
+    let nextLeetcode = null
+
+    try {
+      if (gh) {
+        const [userResponse, reposResponse] = await Promise.all([
+          fetch(`https://api.github.com/users/${encodeURIComponent(gh)}`),
+          fetch(`https://api.github.com/users/${encodeURIComponent(gh)}/repos?per_page=100&sort=updated`),
+        ])
+        if (userResponse.ok && reposResponse.ok) {
+          const [userData, repoData] = await Promise.all([userResponse.json(), reposResponse.json()])
+          nextGithub = userData
+          nextRepos = repoData
+        }
+      }
+
+      if (lc) {
+        nextLeetcode = await fetchLeetcode(lc)
+      }
+
+      setGithub(nextGithub)
+      setRepos(nextRepos)
+      setLeetcode(nextLeetcode)
+      const nextAssessment = calculateAssessment({
+        resumeText,
+        github: nextGithub,
+        repos: nextRepos,
+        leetcode: nextLeetcode,
+        jobText,
+      })
+      const candidateName = getCandidateName(resumeText)
+      const fallbackNarrative = buildCandidateNarrative({
+        candidateName,
+        assessment: nextAssessment,
+        github: nextGithub,
+        leetcode: nextLeetcode,
+        resumeText,
+      })
+      let geminiNarrative = null
+      try {
+        geminiNarrative = await fetchGeminiNarrative({
+          candidateName,
+          assessment: nextAssessment,
+          github: nextGithub,
+          repos: nextRepos,
+          leetcode: nextLeetcode,
+          resumeText,
+          jobText,
+        })
+      } catch {
+        setError('Gemini summary failed, so the app used the local recruiter brief instead.')
+      }
+      setAnalysis({
+        assessment: nextAssessment,
+        candidateName,
+        github: nextGithub,
+        leetcode: nextLeetcode,
+        resumeText,
+        narrative: geminiNarrative || fallbackNarrative,
+        narrativeSource: geminiNarrative ? 'Gemini' : 'Local',
+      })
+      setStatus('Assessment generated from resume, public profile signals, and job context.')
+    } catch {
+      const nextAssessment = calculateAssessment({
+        resumeText,
+        github: nextGithub,
+        repos: nextRepos,
+        leetcode: nextLeetcode,
+        jobText,
+      })
+      const candidateName = getCandidateName(resumeText)
+      setAnalysis({
+        assessment: nextAssessment,
+        candidateName,
+        github: nextGithub,
+        leetcode: nextLeetcode,
+        resumeText,
+        narrative: buildCandidateNarrative({
+          candidateName,
+          assessment: nextAssessment,
+          github: nextGithub,
+          leetcode: nextLeetcode,
+          resumeText,
+        }),
+        narrativeSource: 'Local',
+      })
+      setError('Some live enrichment failed. The assessment still uses the resume, job text, and available links.')
+      setStatus('Partial assessment generated.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const useSample = () => {
+    setResumeText(SAMPLE_RESUME)
+    setJobText(SAMPLE_JOB)
+    localStorage.setItem('candidate_resume', SAMPLE_RESUME)
+    hydrateFromResume(SAMPLE_RESUME)
+    setAnalysis(null)
+    setStatus('Sample candidate loaded. Click Analyze candidate to generate the score.')
+  }
+
+  const canAnalyze = resumeText.trim().length > 20
+  const candidateName = analysis?.candidateName || getCandidateName(resumeText)
+  const aiNarrative = buildCandidateNarrative({
+    candidateName,
+    assessment,
+    github: analysis?.github,
+    leetcode: analysis?.leetcode,
+    resumeText: analysis?.resumeText || resumeText,
+  })
+  const displayedNarrative = analysis?.narrative || aiNarrative
+  const briefHighlights = getBriefHighlights(assessment)
+
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 px-4 py-8 sm:px-6 lg:px-12">
-      <div className="mx-auto flex max-w-7xl flex-col gap-8">
-        
-        <header className="rounded-[2rem] border border-white/10 bg-gradient-to-br from-zinc-950/80 via-zinc-950 to-slate-950/95 p-6 shadow-[0_0_80px_rgba(15,23,42,0.35)] backdrop-blur-xl">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-            <div className="space-y-4">
-              <div className="inline-flex items-center gap-2 rounded-full bg-emerald-500/10 px-4 py-2 text-xs uppercase tracking-[0.3em] text-emerald-300 ring-1 ring-emerald-500/20">
-                <Sparkles className="h-4 w-4 text-emerald-400" /> DevScore
-              </div>
+    <div className="min-h-screen bg-[#f6f4ef] text-stone-950">
+      <div className="border-b border-stone-200 bg-white/85 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-lg bg-emerald-600 text-white">
+              <BrainCircuit className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-lg font-bold">DevTLDR</p>
+              <p className="text-xs text-stone-500">Resume intelligence for recruiters</p>
+            </div>
+          </div>
+          <button onClick={useSample} className="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-semibold shadow-sm transition hover:border-emerald-500">
+            Load sample
+          </button>
+        </div>
+      </div>
+
+      <main className="mx-auto grid max-w-7xl gap-6 px-4 py-8 sm:px-6 lg:grid-cols-[0.85fr_1.15fr] lg:px-8">
+        <section className="space-y-6">
+          <div className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+            <div className="flex items-start justify-between gap-4">
               <div>
-                <h1 className="text-4xl font-semibold tracking-tight text-zinc-100 sm:text-5xl">
-                  Recruiter-ready engineering profiles, scored instantly.
-                </h1>
-                <p className="mt-4 max-w-2xl text-zinc-400 sm:text-lg">
-                  Automatically blend GitHub telemetry, LeetCode proficiency, and recruiter-friendly highlights into a fast, visual scorecard.
+                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">Candidate intake</p>
+                <h1 className="mt-3 text-4xl font-bold tracking-tight">Upload. Enrich. Decide.</h1>
+                <p className="mt-3 text-sm leading-6 text-stone-600">
+                  Parse a resume, detect portfolio links, enrich public coding signals, and produce a recruiter-ready decision brief.
                 </p>
               </div>
+              <ShieldCheck className="h-8 w-8 text-emerald-700" />
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-              <div className="rounded-[1.75rem] border border-white/10 bg-zinc-900/80 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.25)]">
-                <p className="text-xs uppercase tracking-[0.24em] text-zinc-400">Focus</p>
-                <p className="mt-3 text-2xl font-semibold text-zinc-100">Hiring managers get fast clarity</p>
-              </div>
-              <div className="rounded-[1.75rem] border border-white/10 bg-zinc-900/80 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.25)]">
-                <p className="text-xs uppercase tracking-[0.24em] text-zinc-400">Ready for review</p>
-                <p className="mt-3 text-2xl font-semibold text-zinc-100">Profiles, scorecards, and keyword matches</p>
-              </div>
+
+            <label className="mt-6 flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-emerald-300 bg-emerald-50/70 px-5 py-8 text-center transition hover:bg-emerald-50">
+              <UploadCloud className="h-9 w-9 text-emerald-700" />
+              <span className="mt-3 text-sm font-bold">Upload resume</span>
+              <span className="mt-1 text-xs text-stone-500">Supports text-based PDF, DOCX, TXT, MD, and CSV files</span>
+              <input type="file" accept=".txt,.md,.csv,.pdf,.doc,.docx" onChange={handleFile} className="hidden" />
+            </label>
+
+            {fileName && <p className="mt-3 text-xs font-medium text-stone-500">Loaded: {fileName}</p>}
+
+            <textarea
+              value={resumeText}
+              onChange={(event) => {
+                setResumeText(event.target.value)
+                localStorage.setItem('candidate_resume', event.target.value)
+                hydrateFromResume(event.target.value)
+                setAnalysis(null)
+              }}
+              rows={10}
+              placeholder="Or paste resume content here..."
+              className="mt-5 w-full resize-none rounded-lg border border-stone-200 bg-stone-50 px-4 py-3 text-sm leading-6 outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-4 focus:ring-emerald-100"
+            />
+          </div>
+
+          <div className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex items-center gap-2">
+              <Globe2 className="h-5 w-5 text-emerald-700" />
+              <h2 className="text-lg font-bold">Detected and editable sources</h2>
+            </div>
+            <div className="space-y-3">
+              <SourceInput icon={Github} label="GitHub" value={githubHandle} setValue={setGithubHandle} placeholder="username or profile URL" />
+              <SourceInput icon={Linkedin} label="LinkedIn" value={linkedinUrl || detectedLinks.linkedin} setValue={setLinkedinUrl} placeholder="profile URL" />
+              <SourceInput icon={Code2} label="LeetCode" value={leetcodeHandle} setValue={setLeetcodeHandle} placeholder="username or profile URL" />
             </div>
           </div>
-        </header>
 
-        <section className="rounded-[2rem] border border-white/10 bg-zinc-950/70 p-6 shadow-[0_0_60px_rgba(15,23,42,0.35)] backdrop-blur-xl">
-          <form onSubmit={handleAnalyzeProfile} className="space-y-6">
-            
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.24em] text-zinc-400" htmlFor="github-handle">
-                  <Github size={16} className="text-zinc-400" /> GitHub Username
-                </label>
-                <input
-                  id="github-handle"
-                  value={githubHandle}
-                  onChange={(e) => setGithubHandle(e.target.value)}
-                  placeholder="Enter GitHub username"
-                  className="w-full rounded-[1.4rem] border border-white/10 bg-zinc-950/90 px-5 py-4 text-zinc-100 placeholder:text-zinc-600 shadow-[inset_0_0_30px_rgba(15,23,42,0.4)] outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.24em] text-zinc-400" htmlFor="leetcode-handle">
-                  <Code2 size={16} className="text-zinc-400" /> LeetCode Username
-                </label>
-                <input
-                  id="leetcode-handle"
-                  value={leetcodeHandle}
-                  onChange={(e) => setLeetcodeHandle(e.target.value)}
-                  placeholder="Enter LeetCode username"
-                  className="w-full rounded-[1.4rem] border border-white/10 bg-zinc-950/90 px-5 py-4 text-zinc-100 placeholder:text-zinc-600 shadow-[inset_0_0_30px_rgba(15,23,42,0.4)] outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                />
-              </div>
-
-              <div className="space-y-2 md:col-span-2 lg:col-span-1">
-                <label className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.24em] text-zinc-400" htmlFor="linkedin-url">
-                  <Linkedin size={16} className="text-zinc-400" /> LinkedIn Profile Link
-                </label>
-                <input
-                  id="linkedin-url"
-                  value={linkedinUrl}
-                  onChange={(e) => setLinkedinUrl(e.target.value)}
-                  placeholder="Enter LinkedIn profile URL"
-                  className="w-full rounded-[1.4rem] border border-white/10 bg-zinc-950/90 px-5 py-4 text-zinc-100 placeholder:text-zinc-600 shadow-[inset_0_0_30px_rgba(15,23,42,0.4)] outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                />
-              </div>
+          <div className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex items-center gap-2">
+              <BriefcaseBusiness className="h-5 w-5 text-emerald-700" />
+              <h2 className="text-lg font-bold">Optional job match</h2>
             </div>
-
-            {showHighlights && (
-              <div className="space-y-3 rounded-[1.75rem] border border-white/10 bg-black/40 p-4">
-                <p className="text-sm font-semibold uppercase tracking-[0.24em] text-zinc-400">
-                  Paste Professional Summary or Profile About Text
-                </p>
-                <textarea
-                  value={aboutText}
-                  onChange={(e) => setAboutText(e.target.value)}
-                  rows={4}
-                  placeholder="Enter or paste resume background / profile highpoints"
-                  className="w-full rounded-3xl border border-white/10 bg-zinc-950/90 px-4 py-4 text-zinc-100 placeholder:text-zinc-600 shadow-[inset_0_0_24px_rgba(15,23,42,0.35)] outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
-                />
-              </div>
-            )}
-
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={loading}
-                className="inline-flex min-h-[3.5rem] w-full sm:w-auto items-center justify-center gap-3 rounded-3xl bg-gradient-to-r from-emerald-500 to-cyan-500 px-8 text-sm font-semibold text-zinc-950 shadow-[0_18px_50px_rgba(16,185,129,0.18)] transition hover:from-emerald-400 hover:to-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {loading ? <Loader2 className="h-5 w-5 animate-spin text-zinc-950" /> : <Terminal className="h-5 w-5" />}
-                Analyze Profiles
-              </button>
-            </div>
-          </form>
-        </section>
-
-        <section className="rounded-[2rem] border border-white/10 bg-zinc-950/70 p-6 shadow-[0_0_60px_rgba(15,23,42,0.35)]">
-          <div className="grid gap-5 lg:grid-cols-3">
-            <div className="rounded-[1.75rem] border border-white/10 bg-zinc-900/80 p-5 shadow-[0_0_30px_rgba(15,23,42,0.2)]">
-              <div className="inline-flex h-12 w-12 items-center justify-center rounded-3xl bg-emerald-500/10 text-emerald-300">
-                <Github className="h-6 w-6" />
-              </div>
-              <h3 className="mt-5 text-xl font-semibold text-zinc-100">1. Enter handles</h3>
-              <p className="mt-3 text-sm leading-6 text-zinc-400">
-                Add a public GitHub handle and optional LeetCode username, then paste recruiter-friendly summary notes.
-              </p>
-            </div>
-            <div className="rounded-[1.75rem] border border-white/10 bg-zinc-900/80 p-5 shadow-[0_0_30px_rgba(15,23,42,0.2)]">
-              <div className="inline-flex h-12 w-12 items-center justify-center rounded-3xl bg-sky-500/10 text-sky-300">
-                <Terminal className="h-6 w-6" />
-              </div>
-              <h3 className="mt-5 text-xl font-semibold text-zinc-100">2. Analyze profile</h3>
-              <p className="mt-3 text-sm leading-6 text-zinc-400">
-                Fetch GitHub and LeetCode metrics, then surface repo health, strengths, and matched keywords.
-              </p>
-            </div>
-            <div className="rounded-[1.75rem] border border-white/10 bg-zinc-900/80 p-5 shadow-[0_0_30px_rgba(15,23,42,0.2)]">
-              <div className="inline-flex h-12 w-12 items-center justify-center rounded-3xl bg-violet-500/10 text-violet-300">
-                <Sparkles className="h-6 w-6" />
-              </div>
-              <h3 className="mt-5 text-xl font-semibold text-zinc-100">3. Review scorecard</h3>
-              <p className="mt-3 text-sm leading-6 text-zinc-400">
-                Read recruiter-ready insights and compare technical readiness at a glance.
-              </p>
-            </div>
-          </div>
-          <div className="mt-6 rounded-[1.75rem] border border-white/10 bg-black/40 p-5">
-            <p className="text-sm uppercase tracking-[0.24em] text-zinc-400">Example workflow</p>
-            <p className="mt-4 text-base leading-7 text-zinc-300">
-              Example: enter `gaearon` for GitHub, add a LeetCode handle if available, paste a short profile summary, and click Analyze. The dashboard then shows repo metrics, algorithmic depth, and recruiter keyword signals together.
-            </p>
-          </div>
-        </section>
-
-        {error && (
-          <div className="rounded-[1.75rem] border border-rose-500/20 bg-rose-500/5 px-6 py-4 text-sm text-rose-200">
-            <div className="flex items-center gap-3">
-              <AlertTriangle className="h-5 w-5 text-rose-300" />
-              <span>{error}</span>
-            </div>
-          </div>
-        )}
-
-        {(profile || leetcode) && (
-          <main className="grid gap-8">
-            <section className="rounded-[2rem] border border-white/10 bg-gradient-to-r from-emerald-500/10 via-transparent to-cyan-500/10 p-[1px] shadow-[0_0_60px_rgba(15,23,42,0.35)]">
-              <div className="rounded-[2rem] bg-zinc-950/95 p-6">
-                <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                  <div>
-                    <p className="text-sm uppercase tracking-[0.24em] text-zinc-400">Recruiter TL;DR</p>
-                    <h2 className="mt-3 text-3xl font-semibold text-zinc-100">Executive summary for fast screening</h2>
-                  </div>
-                  {profile && (
-                    <div className="inline-flex items-center gap-3 rounded-full bg-zinc-900/80 px-4 py-2 text-sm uppercase tracking-[0.24em] text-zinc-300 ring-1 ring-white/10">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                      {skillClassification}
-                    </div>
-                  )}
+            <label className="flex cursor-pointer items-center justify-between gap-4 rounded-lg border border-dashed border-stone-300 bg-stone-50 px-4 py-4 transition hover:border-emerald-400 hover:bg-emerald-50">
+              <div className="flex items-center gap-3">
+                <Paperclip className="h-5 w-5 text-emerald-700" />
+                <div>
+                  <p className="text-sm font-bold">Upload job description</p>
+                  <p className="text-xs text-stone-500">PDF, DOCX, TXT, MD, or CSV</p>
                 </div>
-                <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  {summaryBullets.map((bullet, index) => (
-                    <div key={index} className="rounded-[1.75rem] border border-white/10 bg-zinc-950/80 p-5 shadow-[0_0_30px_rgba(15,23,42,0.2)]">
-                      <p className="text-sm text-zinc-400">Insight {index + 1}</p>
-                      <p className="mt-3 text-base leading-7 text-zinc-100">{bullet}</p>
-                    </div>
+              </div>
+              <span className="text-xs font-bold text-emerald-800">Choose file</span>
+              <input type="file" accept=".txt,.md,.csv,.pdf,.doc,.docx" onChange={handleJobFile} className="hidden" />
+            </label>
+            {jobFileName && <p className="mt-3 text-xs font-medium text-stone-500">Loaded JD: {jobFileName}</p>}
+            <textarea
+              value={jobText}
+              onChange={(event) => {
+                setJobText(event.target.value)
+                setAnalysis(null)
+              }}
+              rows={5}
+              placeholder="Or paste the job description here..."
+              className="mt-3 max-h-52 w-full resize-none rounded-lg border border-stone-200 bg-stone-50 px-4 py-3 text-sm leading-6 outline-none focus:border-emerald-500 focus:bg-white focus:ring-4 focus:ring-emerald-100"
+            />
+          </div>
+
+          <button
+            onClick={analyzeCandidate}
+            disabled={!canAnalyze || loading}
+            className="flex w-full items-center justify-center gap-3 rounded-lg bg-emerald-700 px-5 py-4 text-sm font-bold text-white shadow-lg shadow-emerald-900/15 transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+          >
+            {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}
+            Analyze candidate
+          </button>
+
+          {(status || error) && (
+            <div className={`rounded-lg border p-4 text-sm ${error ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`}>
+              <div className="flex items-center gap-2">
+                {error ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+                <span>{error || status}</span>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="space-y-6">
+          <div className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+            <div className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-start">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">Recruiter brief</p>
+                <h2 className="mt-2 truncate text-3xl font-bold">{candidateName}</h2>
+                <p className="mt-2 text-sm text-stone-500">
+                  {assessment ? 'Generated from the last completed analysis.' : 'Upload a resume, add sources, then click Analyze candidate.'}
+                </p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {briefHighlights.map((highlight) => (
+                    <span key={highlight} className="rounded-md bg-stone-100 px-3 py-1.5 text-xs font-bold text-stone-700">
+                      {highlight}
+                    </span>
                   ))}
                 </div>
               </div>
-            </section>
-
-            <section className="grid gap-6 xl:grid-cols-[0.9fr_0.8fr]">
-              <article className="rounded-[2rem] border border-white/10 bg-zinc-950/80 p-6 shadow-[0_0_50px_rgba(15,23,42,0.28)]">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-sm uppercase tracking-[0.24em] text-zinc-400">GitHub Deep Telemetry</p>
-                    <h3 className="mt-2 text-2xl font-semibold text-zinc-100">Public repository health</h3>
-                  </div>
-                  <div className="rounded-full bg-zinc-900/80 px-3 py-1 text-xs uppercase tracking-[0.24em] text-emerald-300 ring-1 ring-emerald-500/15">
-                    {repos.length} repositories
-                  </div>
-                </div>
-                <div className="mt-6 grid gap-4 lg:grid-cols-[0.9fr_0.6fr]">
-                  <div className="space-y-4">
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="rounded-[1.75rem] border border-white/10 bg-black/40 p-5">
-                        <p className="text-xs uppercase tracking-[0.24em] text-zinc-400">Total stars</p>
-                        <p className="mt-3 text-3xl font-semibold text-zinc-100">{totalStars}</p>
-                      </div>
-                      <div className="rounded-[1.75rem] border border-white/10 bg-black/40 p-5">
-                        <p className="text-xs uppercase tracking-[0.24em] text-zinc-400">Total forks</p>
-                        <p className="mt-3 text-3xl font-semibold text-zinc-100">{totalForks}</p>
-                      </div>
-                    </div>
-                    <div className="rounded-[1.75rem] border border-white/10 bg-zinc-900/60 p-5">
-                      <p className="text-sm uppercase tracking-[0.24em] text-zinc-400">Top languages</p>
-                      <div className="mt-4 flex flex-wrap gap-3">
-                        {languageDistribution.length ? (
-                          languageDistribution.map((item) => (
-                            <div key={item.language} className="flex min-w-[130px] flex-col gap-2 rounded-3xl bg-zinc-950/90 px-4 py-3">
-                              <span className="text-sm font-semibold text-zinc-100">{item.language}</span>
-                              <div className="h-2 overflow-hidden rounded-full bg-zinc-800">
-                                <div className="h-full rounded-full" style={{ width: `${item.percentage}%`, backgroundColor: item.color }} />
-                              </div>
-                              <span className="text-xs text-zinc-400">{item.percentage}% of repos</span>
-                            </div>
-                          ))
-                        ) : (
-                          <p className="text-sm text-zinc-500">No languages indexed.</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="rounded-[1.75rem] border border-white/10 bg-zinc-900/60 p-5">
-                    <p className="text-sm uppercase tracking-[0.24em] text-zinc-400">Top repositories</p>
-                    <div className="mt-5 space-y-4">
-                      {topRepos.length ? (
-                        topRepos.map((repo) => (
-                          <a
-                            key={repo.id}
-                            href={repo.html_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="block rounded-3xl border border-white/5 bg-zinc-950/85 p-4 transition hover:border-cyan-500/40 hover:bg-zinc-900/95"
-                          >
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="space-y-1">
-                                <p className="text-lg font-semibold text-zinc-100">{repo.name}</p>
-                                <p className="text-sm text-zinc-400 line-clamp-2">{repo.description || 'No description provided.'}</p>
-                              </div>
-                              <ArrowRight className="h-5 w-5 flex-shrink-0 text-cyan-400" />
-                            </div>
-                            <div className="mt-4 flex flex-wrap gap-2 text-xs text-zinc-400">
-                              <span className="rounded-full bg-zinc-900/75 px-2.5 py-1">{repo.language || 'Unknown'}</span>
-                              <span className="rounded-full bg-zinc-900/75 px-2.5 py-1">★ {repo.stargazers_count}</span>
-                            </div>
-                          </a>
-                        ))
-                      ) : (
-                        <p className="text-sm text-zinc-500">No public repositories discovered.</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </article>
-
-              <article className="rounded-[2rem] border border-white/10 bg-zinc-950/80 p-6 shadow-[0_0_50px_rgba(15,23,42,0.28)]">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-sm uppercase tracking-[0.24em] text-zinc-400">LeetCode Assessment</p>
-                    <h3 className="mt-2 text-2xl font-semibold text-zinc-100">Problem solving distribution</h3>
-                  </div>
-                  <div className="rounded-full bg-zinc-900/80 px-3 py-1 text-xs uppercase tracking-[0.24em] text-cyan-300 ring-1 ring-cyan-500/15">
-                    {leetcode ? `${leetcode.totalSolved} solved` : 'Not loaded'}
-                  </div>
-                </div>
-                <div className="mt-6 space-y-5">
-                  {leetcode ? (
-                    <>
-                      <div className="space-y-5">
-                        {[
-                          { label: 'Easy', value: leetcode.easySolved, color: 'bg-emerald-500' },
-                          { label: 'Medium', value: leetcode.mediumSolved, color: 'bg-sky-500' },
-                          { label: 'Hard', value: leetcode.hardSolved, color: 'bg-violet-500' },
-                        ].map((item) => {
-                          const ratio = leetcode.totalSolved ? Math.round((item.value / leetcode.totalSolved) * 100) : 0
-                          return (
-                            <div key={item.label} className="space-y-2">
-                              <div className="flex items-center justify-between gap-4 text-xs uppercase tracking-[0.24em] text-zinc-400">
-                                <span>{item.label}</span>
-                                <span>{item.value} solved</span>
-                              </div>
-                              <div className="h-4 overflow-hidden rounded-full bg-zinc-900/80">
-                                <div className={`h-full rounded-full ${item.color}`} style={{ width: `${ratio}%` }} />
-                              </div>
-                              <p className="text-xs text-zinc-500">{ratio}% of aggregate solutions</p>
-                            </div>
-                          )
-                        })}
-                      </div>
-                      <div className="rounded-[1.75rem] border border-white/10 bg-black/40 p-4 text-sm text-zinc-400 leading-relaxed">
-                        Medium and Hard problem capacities indicate strategic technical grit. High target focus in these indexes maps to robust system engineering roles.
-                      </div>
-                    </>
-                  ) : (
-                    <div className="rounded-[1.75rem] border border-dashed border-white/10 bg-black/30 p-6 text-center text-sm text-zinc-500">
-                      Provide a valid handle to stream live algorithmic metrics.
-                    </div>
-                  )}
-                </div>
-              </article>
-            </section>
-
-            <section className="rounded-[2rem] border border-white/10 bg-zinc-950/80 p-6 shadow-[0_0_50px_rgba(15,23,42,0.28)]">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm uppercase tracking-[0.24em] text-zinc-400">Professional Keywords Matcher</p>
-                  <h3 className="mt-2 text-2xl font-semibold text-zinc-100">Highlighted core competencies</h3>
-                </div>
-                <div className="rounded-full bg-zinc-900/80 px-3 py-1 text-xs uppercase tracking-[0.24em] text-emerald-300 ring-1 ring-emerald-500/15">
-                  {keywords.length} matched
+              <div className={`grid h-24 w-24 place-items-center rounded-lg text-white ${assessment ? 'bg-stone-950' : 'bg-stone-300'}`}>
+                <div className="text-center">
+                  <p className="text-3xl font-black">{assessment?.score ?? '--'}</p>
+                  <p className="text-xs uppercase tracking-[0.18em] text-stone-300">score</p>
                 </div>
               </div>
-              <div className="mt-6 min-h-[100px] rounded-[1.75rem] border border-white/10 bg-black/40 p-5 flex items-center">
-                {keywords.length ? (
-                  <div className="flex flex-wrap gap-3">
-                    {keywords.map((keyword) => (
-                      <span key={keyword} className="rounded-full bg-zinc-800 px-4 py-2 text-sm font-medium text-emerald-400 ring-1 ring-emerald-500/15">
-                        {keyword}
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm leading-7 text-zinc-500">
-                    Industry-specific tags will update here automatically when custom profile summary content matches tracking signatures.
-                  </p>
-                )}
+            </div>
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              <Metric icon={ClipboardCheck} label="Decision" value={assessment?.recommendation || 'Run analysis'} />
+              <Metric icon={FileText} label="Skills found" value={assessment ? candidateSkills.length || 'None' : `${liveCandidateSkills.length} detected`} />
+              <Metric icon={BarChart3} label="Job match" value={assessment ? (jobSkills.length ? `${matchedJobSkills.length}/${jobSkills.length}` : 'Optional') : 'Run analysis'} />
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-emerald-700" />
+              <h3 className="text-xl font-bold">{analysis?.narrativeSource === 'Gemini' ? 'Gemini candidate brief' : 'AI-style candidate brief'}</h3>
+            </div>
+            <p className="max-w-3xl whitespace-pre-line text-sm leading-7 text-stone-700">{displayedNarrative}</p>
+          </div>
+
+          <div className="grid gap-6 xl:grid-cols-2">
+            <InsightCard title="Strengths" tone="green" items={assessment?.strengths.length ? assessment.strengths : ['Run analysis to generate strengths.']} />
+            <InsightCard title="Risks to probe" tone="amber" items={assessment?.risks.length ? assessment.risks : ['Run analysis to generate screening risks.']} />
+          </div>
+
+          <div className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+            <div className="mb-5 flex items-center justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-bold">Skill evidence</h3>
+                <p className="mt-1 text-sm text-stone-500">Extracted from resume and matched against the job brief.</p>
               </div>
-            </section>
-          </main>
-        )}
+              <BadgeCheck className="h-6 w-6 text-emerald-700" />
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {((assessment ? candidateSkills : liveCandidateSkills).length ? (assessment ? candidateSkills : liveCandidateSkills) : ['No skills detected yet']).map((skill) => (
+                <span key={skill} className={`rounded-md px-3 py-2 text-sm font-semibold ${matchedJobSkills.includes(skill) ? 'bg-emerald-100 text-emerald-900' : 'bg-stone-100 text-stone-700'}`}>
+                  {skill}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-6 xl:grid-cols-2">
+            <ProfilePanel
+              title="GitHub signal"
+              icon={Github}
+              rows={[
+                ['Profile', github?.login || githubHandle || 'Not provided'],
+                ['Public repos', github?.public_repos ?? repos.length ?? 'Pending'],
+                ['Followers', github?.followers ?? 'Pending'],
+                ['Recent repos loaded', repos.length],
+              ]}
+            />
+            <ProfilePanel
+              title="Coding signal"
+              icon={Code2}
+              rows={[
+                ['LeetCode', leetcodeHandle || 'Not provided'],
+                ['Total solved', leetcode?.totalSolved ?? 'Pending'],
+                ['Medium solved', leetcode?.mediumSolved ?? 'Pending'],
+                ['Hard solved', leetcode?.hardSolved ?? 'Pending'],
+              ]}
+            />
+          </div>
+
+          <div className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+            <h3 className="text-xl font-bold">Recruiter next steps</h3>
+            <div className="mt-4 space-y-3">
+              {[
+                'Verify employment dates, ownership claims, and project depth during screening.',
+                'Ask for one architecture walkthrough tied to the strongest resume project.',
+                assessment && jobSkills.length ? 'Use unmatched job skills as targeted interview probes.' : 'Add or parse a job description, then run analysis to generate role-specific fit notes.',
+              ].map((step) => (
+                <div key={step} className="flex gap-3 rounded-lg bg-stone-50 p-4 text-sm text-stone-700">
+                  <ChevronRight className="mt-0.5 h-4 w-4 flex-none text-emerald-700" />
+                  <p>{step}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  )
+}
+
+function SourceInput({ icon: Icon, label, value, setValue, placeholder }) {
+  return (
+    <label className="block">
+      <span className="mb-1 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-stone-500">
+        <Icon className="h-4 w-4" />
+        {label}
+      </span>
+      <input
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-lg border border-stone-200 bg-stone-50 px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:bg-white focus:ring-4 focus:ring-emerald-100"
+      />
+    </label>
+  )
+}
+
+function Metric({ icon: Icon, label, value }) {
+  return (
+    <div className="rounded-lg border border-stone-200 bg-stone-50 p-4">
+      <Icon className="h-5 w-5 text-emerald-700" />
+      <p className="mt-3 text-xs font-bold uppercase tracking-[0.14em] text-stone-500">{label}</p>
+      <p className="mt-1 text-lg font-bold">{value}</p>
+    </div>
+  )
+}
+
+function InsightCard({ title, items, tone }) {
+  const isGreen = tone === 'green'
+  return (
+    <div className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+      <h3 className="text-xl font-bold">{title}</h3>
+      <div className="mt-4 space-y-3">
+        {items.map((item) => (
+          <div key={item} className={`rounded-lg p-4 text-sm ${isGreen ? 'bg-emerald-50 text-emerald-950' : 'bg-amber-50 text-amber-950'}`}>
+            {item}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ProfilePanel({ title, icon: Icon, rows }) {
+  return (
+    <div className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+      <div className="flex items-center gap-2">
+        <Icon className="h-5 w-5 text-emerald-700" />
+        <h3 className="text-xl font-bold">{title}</h3>
+      </div>
+      <div className="mt-5 divide-y divide-stone-100">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex items-center justify-between gap-4 py-3 text-sm">
+            <span className="text-stone-500">{label}</span>
+            <span className="max-w-[14rem] truncate font-semibold">{value}</span>
+          </div>
+        ))}
       </div>
     </div>
   )
