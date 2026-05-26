@@ -311,10 +311,33 @@ const parseResumeFile = async (file) => {
   return readFileAsText(file)
 }
 
+// Helper: Detect if a skill has proof/evidence in the resume (not just listed)
+const hasSkillProof = (skillLabel, resumeText) => {
+  const normalized = ` ${resumeText.toLowerCase().replace(/[^\w+#.-]+/g, ' ')} `
+  const skill = skillLabel.toLowerCase()
+  
+  // Action verbs that indicate actual use of a skill
+  const actionVerbs = ['built', 'developed', 'used', 'worked', 'implemented', 'designed', 'architected', 'led', 'owned', 'shipped', 'deployed', 'managed', 'optimized']
+  
+  // Check if skill appears near action verbs (indicating real usage)
+  const hasActionContext = actionVerbs.some(verb => 
+    normalized.includes(` ${verb} `) && 
+    (normalized.includes(` ${verb} `) && normalized.includes(` ${skill} `) || 
+     normalized.slice(Math.max(0, normalized.indexOf(` ${verb} `) - 50), normalized.indexOf(` ${verb} `) + 50).includes(skill))
+  )
+  
+  // Check if skill appears multiple times (stronger signal than one mention)
+  const skillCount = (normalized.match(new RegExp(` ${skill} `, 'g')) || []).length
+  const hasMultipleMentions = skillCount >= 2
+  
+  return hasActionContext || hasMultipleMentions
+}
+
 const calculateAssessment = ({ resumeText, github, repos, leetcode, jobText }) => {
   const candidateSkills = getSkills(resumeText)
   const jobSkills = getSkills(jobText)
   const matchedJobSkills = jobSkills.filter((skill) => candidateSkills.includes(skill))
+  const provenJobSkills = matchedJobSkills.filter((skill) => hasSkillProof(skill, resumeText))
   const resumeCategory = getRoleCategory(resumeText)
   const jobCategory = jobText.trim() ? getRoleCategory(jobText) : 'general'
   const hasJob = Boolean(jobText.trim())
@@ -351,11 +374,17 @@ const calculateAssessment = ({ resumeText, github, repos, leetcode, jobText }) =
     // Role category alignment: 10 points
     const categoryBonus = resumeCategory === jobCategory ? 10 : resumeCategory === 'technical' ? 8 : 5
 
-    // Skill match as primary driver: 30 points
-    // Calculate as: (matched skills / total job skills) * 30
-    // Plus bonus if candidate has extra relevant skills
-    const jobSkillMatchPercent = matchedJobSkills.length / Math.max(jobSkills.length, 1)
-    const skillMatchScore = Math.round(jobSkillMatchPercent * 25)
+    // Skill match as primary driver with PROOF weighting
+    // Base score from matched skills, bonus for skills with proof (evidence of actual use)
+    const totalJobSkills = Math.max(jobSkills.length, 1)
+    const baseSkillMatchPercent = matchedJobSkills.length / totalJobSkills
+    const provenSkillPercent = provenJobSkills.length / totalJobSkills
+    
+    // Skill score: 15 points for raw match + 10 points for proven skills
+    const baseSkillScore = Math.round(baseSkillMatchPercent * 15)
+    const provenSkillBonus = Math.round(provenSkillPercent * 10)
+    const skillMatchScore = baseSkillScore + provenSkillBonus // 0–25 points
+    
     const extraSkillBonus = Math.min(candidateSkills.length - jobSkills.length, 5) * 0.8 // 1 extra skill ≈ 0.8 points
 
     // Experience signal alignment: 10 points
@@ -376,7 +405,26 @@ const calculateAssessment = ({ resumeText, github, repos, leetcode, jobText }) =
 
   // TIER 3: EXTERNAL EVIDENCE (GitHub + LeetCode) — 25 points max
   const githubScore = github ? Math.min(12, 6 + Math.floor((github.public_repos || repos.length) / 4)) : 0
-  const leetcodeScore = leetcode ? Math.min(13, 5 + Math.floor((leetcode.totalSolved || 0) / 20)) : 0
+  
+  // LeetCode scoring: Include easy problems for breadth + hard problems for depth
+  let leetcodeScore = 0
+  if (leetcode) {
+    const totalSolved = leetcode.totalSolved || 0
+    const easySolved = leetcode.easySolved || 0
+    const hardSolved = leetcode.hardSolved || 0
+    
+    // Base score from total solved: 0–6 points
+    const totalScore = Math.min(6, Math.floor(totalSolved / 30))
+    
+    // Bonus for easy problems (breadth/foundation): 0–4 points
+    const easyBonus = Math.min(4, Math.floor(easySolved / 15))
+    
+    // Bonus for hard problems (depth): 0–3 points
+    const hardBonus = Math.min(3, Math.floor(hardSolved / 10))
+    
+    leetcodeScore = Math.min(13, totalScore + easyBonus + hardBonus)
+  }
+  
   const tier3Score = githubScore + leetcodeScore
 
   // FINAL SCORE: Sum all tiers, clamped to 0–100
@@ -398,6 +446,7 @@ const calculateAssessment = ({ resumeText, github, repos, leetcode, jobText }) =
     candidateSkills,
     jobSkills,
     matchedJobSkills,
+    provenJobSkills, // Skills with evidence of actual use
     resumeCategory,
     jobCategory,
     categoryCompatible,
@@ -408,15 +457,16 @@ const calculateAssessment = ({ resumeText, github, repos, leetcode, jobText }) =
       hasJob && !categoryCompatible && `Role mismatch: resume appears ${resumeCategory}, while the job appears ${jobCategory}.`,
       hasJob && matchedJobSkills.length === 0 && 'No skill overlap with the supplied job requirements.',
       hasJob && matchedJobSkills.length < Math.ceil(jobSkills.length * 0.5) && `Skill match is weak: only ${matchedJobSkills.length}/${jobSkills.length} required skills found.`,
+      hasJob && provenJobSkills.length < matchedJobSkills.length && `Only ${provenJobSkills.length}/${matchedJobSkills.length} matched skills have evidence of actual use.`,
       !github && 'GitHub evidence is missing or unavailable.',
       !leetcode && 'LeetCode signal is not verified.',
       candidateSkills.length < 5 && 'Resume has limited explicit skill density.',
     ].filter(Boolean),
     strengths: [
       candidateSkills.length >= 6 && 'Broad technical skill coverage detected.',
-      hasJob && categoryCompatible && matchedJobSkills.length >= Math.ceil(jobSkills.length * 0.8) && 'Strong skill alignment with the supplied job requirements.',
+      hasJob && categoryCompatible && provenJobSkills.length >= Math.ceil(jobSkills.length * 0.6) && `Strong proven skill alignment: ${provenJobSkills.length} required skills demonstrated with evidence.`,
       github && `${github.public_repos || repos.length} public repositories demonstrate hands-on portfolio work.`,
-      leetcode && `${leetcode.totalSolved} solved problems support problem-solving capability.`,
+      leetcode && `${leetcode.totalSolved} solved problems (including ${leetcode.easySolved || 0} easy) support problem-solving capability and foundation knowledge.`,
       experienceKeywords.some((kw) => resumeLower.includes(kw)) && 'Resume shows leadership and ownership in delivery.',
     ].filter(Boolean),
   }
@@ -967,7 +1017,7 @@ function App() {
           <div className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-emerald-700" />
-              <h3 className="text-xl font-bold">{analysis?.narrativeSource === 'Gemini' ? 'Gemini candidate brief' : 'AI-style candidate brief'}</h3>
+              <h3 className="text-xl font-bold">{'Candidate brief'}</h3>
             </div>
             <CandidateBrief text={displayedNarrative} />
           </div>
