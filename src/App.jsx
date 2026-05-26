@@ -311,26 +311,57 @@ const parseResumeFile = async (file) => {
   return readFileAsText(file)
 }
 
-// Helper: Detect if a skill has proof/evidence in the resume (not just listed)
+// Helper: Extract years of experience from resume (looks for date ranges)
+const extractYearsOfExperience = (resumeText) => {
+  const datePattern = /(\w+\s+\d{4})\s*–\s*(\w+\s+\d{4}|present)/gi
+  const matches = resumeText.match(datePattern) || []
+  
+  if (matches.length === 0) return 0
+  
+  const monthMap = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 }
+  let totalMonths = 0
+  
+  matches.forEach((range) => {
+    const [startStr, endStr] = range.split('–').map((s) => s.trim())
+    const startMatch = startStr.match(/(\w+)\s+(\d{4})/)
+    const endMatch = endStr.match(/(\w+)\s+(\d{4})/)
+    
+    if (startMatch && endMatch) {
+      const startMonth = monthMap[startMatch[1].toLowerCase().slice(0, 3)] || 1
+      const startYear = parseInt(startMatch[2], 10)
+      const endMonth = endStr.toLowerCase().includes('present') ? new Date().getMonth() + 1 : monthMap[endMatch[1].toLowerCase().slice(0, 3)] || 1
+      const endYear = endStr.toLowerCase().includes('present') ? new Date().getFullYear() : parseInt(endMatch[2], 10)
+      
+      const months = (endYear - startYear) * 12 + (endMonth - startMonth)
+      totalMonths += Math.max(0, months)
+    }
+  })
+  
+  return Math.round(totalMonths / 12 * 10) / 10 // Round to 1 decimal
+}
+
+// Helper: Detect if a skill has proof/evidence in the resume (not just listed in skills section)
 const hasSkillProof = (skillLabel, resumeText) => {
-  const normalized = ` ${resumeText.toLowerCase().replace(/[^\w+#.-]+/g, ' ')} `
   const skill = skillLabel.toLowerCase()
   
   // Action verbs that indicate actual use of a skill
-  const actionVerbs = ['built', 'developed', 'used', 'worked', 'implemented', 'designed', 'architected', 'led', 'owned', 'shipped', 'deployed', 'managed', 'optimized']
+  const actionVerbs = ['built', 'developed', 'used', 'worked', 'implemented', 'designed', 'architected', 'led', 'owned', 'shipped', 'deployed', 'managed', 'optimized', 'engineered', 'spearheaded']
   
-  // Check if skill appears near action verbs (indicating real usage)
-  const hasActionContext = actionVerbs.some(verb => 
-    normalized.includes(` ${verb} `) && 
-    (normalized.includes(` ${verb} `) && normalized.includes(` ${skill} `) || 
-     normalized.slice(Math.max(0, normalized.indexOf(` ${verb} `) - 50), normalized.indexOf(` ${verb} `) + 50).includes(skill))
+  // Extract ONLY the Professional Experience and Projects sections (not Skills or Education)
+  const experienceSection = resumeText.match(/(?:professional\s+experience|experience|projects)([\s\S]*?)(?=(?:technical\s+skills|skills|education|$))/i)?.[1] || ''
+  
+  if (!experienceSection) return false
+  
+  const normalized = ` ${experienceSection.toLowerCase().replace(/[^\w+#.-]+/g, ' ')} `
+  const skillNormalized = ` ${skill} `
+  
+  // Strict check: skill must appear within the same "bullet point" (marked by dashes) as an action verb
+  const bullets = experienceSection.split(/[-•]\s+/).map((b) => ` ${b.toLowerCase().replace(/[^\w+#.-]+/g, ' ')} `)
+  
+  return bullets.some((bullet) =>
+    bullet.includes(skillNormalized) &&
+    actionVerbs.some((verb) => bullet.includes(` ${verb} `))
   )
-  
-  // Check if skill appears multiple times (stronger signal than one mention)
-  const skillCount = (normalized.match(new RegExp(` ${skill} `, 'g')) || []).length
-  const hasMultipleMentions = skillCount >= 2
-  
-  return hasActionContext || hasMultipleMentions
 }
 
 const calculateAssessment = ({ resumeText, github, repos, leetcode, jobText }) => {
@@ -341,6 +372,15 @@ const calculateAssessment = ({ resumeText, github, repos, leetcode, jobText }) =
   const resumeCategory = getRoleCategory(resumeText)
   const jobCategory = jobText.trim() ? getRoleCategory(jobText) : 'general'
   const hasJob = Boolean(jobText.trim())
+  
+  // Extract candidate's actual years of experience
+  const candidateYearsExp = extractYearsOfExperience(resumeText)
+  
+  // Extract required years of experience from job description (e.g., "10+ years", "5 years")
+  const jobYearsMatch = jobText.match(/(\d+)\+?\s*years/i)
+  const requiredYears = jobYearsMatch ? parseInt(jobYearsMatch[1], 10) : 0
+  const experienceMismatch = requiredYears > 0 && candidateYearsExp < requiredYears
+  
   const categoryCompatible =
     !hasJob ||
     jobCategory === 'general' ||
@@ -389,8 +429,16 @@ const calculateAssessment = ({ resumeText, github, repos, leetcode, jobText }) =
 
     // Experience signal alignment: 10 points
     // Count relevant keywords (e.g., "led", "owned", "architected" for technical roles)
+    // BUT: Scale down if candidate doesn't meet required experience level
     const experienceCount = experienceKeywords.filter((kw) => resumeLower.includes(kw)).length
-    const experienceSignalScore = Math.min(experienceCount * 1.2, 10)
+    let experienceSignalScore = Math.min(experienceCount * 1.2, 10)
+    
+    // Heavy penalty if job requires years of experience candidate doesn't have
+    if (experienceMismatch) {
+      const experienceGap = requiredYears - candidateYearsExp
+      const experiencePenalty = Math.min(experienceGap * 3, 15) // Up to 15 point penalty
+      experienceSignalScore = Math.max(0, experienceSignalScore - experiencePenalty)
+    }
 
     tier2Score = categoryBonus + skillMatchScore + Math.min(extraSkillBonus, 5) + experienceSignalScore
   } else if (hasJob && !categoryCompatible) {
@@ -399,6 +447,11 @@ const calculateAssessment = ({ resumeText, github, repos, leetcode, jobText }) =
   } else {
     // No job description provided: base score on skill strength alone
     tier2Score = Math.min(candidateSkills.length * 4, 35)
+  }
+
+  // Apply experience level penalty to overall tier2Score if mismatch is severe
+  if (hasJob && experienceMismatch && requiredYears > 5) {
+    tier2Score = Math.max(0, tier2Score - 20) // Additional 20 point penalty for senior role with junior candidate
   }
 
   tier2Score = Math.min(tier2Score, 50) // Cap at 50
@@ -450,14 +503,18 @@ const calculateAssessment = ({ resumeText, github, repos, leetcode, jobText }) =
     resumeCategory,
     jobCategory,
     categoryCompatible,
+    candidateYearsExp, // Extracted years of experience
+    requiredYears, // Required years from job
+    experienceMismatch, // Whether candidate meets experience requirement
     tier1Score, // Foundation
     tier2Score, // Job alignment
     tier3Score, // External evidence
     risks: [
       hasJob && !categoryCompatible && `Role mismatch: resume appears ${resumeCategory}, while the job appears ${jobCategory}.`,
+      experienceMismatch && `Experience gap: job requires ${requiredYears}+ years, but candidate has ~${candidateYearsExp} years.`,
       hasJob && matchedJobSkills.length === 0 && 'No skill overlap with the supplied job requirements.',
       hasJob && matchedJobSkills.length < Math.ceil(jobSkills.length * 0.5) && `Skill match is weak: only ${matchedJobSkills.length}/${jobSkills.length} required skills found.`,
-      hasJob && provenJobSkills.length < matchedJobSkills.length && `Only ${provenJobSkills.length}/${matchedJobSkills.length} matched skills have evidence of actual use.`,
+      hasJob && provenJobSkills.length < matchedJobSkills.length && `Only ${provenJobSkills.length}/${matchedJobSkills.length} matched skills have evidence of actual use in experience/projects.`,
       !github && 'GitHub evidence is missing or unavailable.',
       !leetcode && 'LeetCode signal is not verified.',
       candidateSkills.length < 5 && 'Resume has limited explicit skill density.',
@@ -467,6 +524,7 @@ const calculateAssessment = ({ resumeText, github, repos, leetcode, jobText }) =
       hasJob && categoryCompatible && provenJobSkills.length >= Math.ceil(jobSkills.length * 0.6) && `Strong proven skill alignment: ${provenJobSkills.length} required skills demonstrated with evidence.`,
       github && `${github.public_repos || repos.length} public repositories demonstrate hands-on portfolio work.`,
       leetcode && `${leetcode.totalSolved} solved problems (including ${leetcode.easySolved || 0} easy) support problem-solving capability and foundation knowledge.`,
+      !experienceMismatch && candidateYearsExp > 0 && `Candidate has ${candidateYearsExp} years of relevant experience matching job requirements.`,
       experienceKeywords.some((kw) => resumeLower.includes(kw)) && 'Resume shows leadership and ownership in delivery.',
     ].filter(Boolean),
   }
