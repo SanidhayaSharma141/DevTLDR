@@ -323,23 +323,72 @@ const calculateAssessment = ({ resumeText, github, repos, leetcode, jobText }) =
     jobCategory === 'general' ||
     resumeCategory === jobCategory ||
     (resumeCategory === 'technical' && jobCategory === 'operations' && countCategorySignals(jobText, 'technical') > 2)
-  const categoryPenalty = hasJob && !categoryCompatible ? 42 : 0
-  const resumeScore = resumeText.trim() ? 24 : 0
-  const skillScore = Math.min(candidateSkills.length * 4, 28)
-  const githubScore = github ? Math.min(18, 8 + Math.floor((github.public_repos || repos.length) / 3)) : 0
-  const leetcodeScore = leetcode ? Math.min(12, Math.floor((leetcode.totalSolved || 0) / 25) + 4) : 0
-  const jobScore = hasJob
-    ? categoryCompatible
-      ? Math.round((matchedJobSkills.length / Math.max(jobSkills.length, 1)) * 18)
-      : 0
-    : 8
-  const score = clamp(resumeScore + skillScore + githubScore + leetcodeScore + jobScore - categoryPenalty)
+
+  // Experience keywords for evaluating leadership and ownership
+  const experienceKeywords = [
+    'led', 'owned', 'architected', 'designed', 'built', 'developed', 'shipped',
+    'managed', 'scaled', 'optimized', 'mentored', 'delivered', 'implemented',
+  ]
+  const resumeLower = resumeText.toLowerCase()
+
+  // ============================================================================
+  // STRUCTURED 3-TIER SCORING FORMULA (Total: 100 points)
+  // ============================================================================
+  // Tier 1: Foundation & Candidate Quality (25 points max)
+  // Tier 2: Job Alignment & Fit (50 points max) ← HIGH PRIORITY TIER
+  // Tier 3: External Evidence & Depth (25 points max)
+  // ============================================================================
+
+  // TIER 1: FOUNDATION (Resume quality + Skill breadth) — 25 points max
+  const resumePresence = resumeText.trim().length > 50 ? 15 : resumeText.trim().length > 0 ? 8 : 0
+  const skillBreadth = Math.min(candidateSkills.length * 2, 10) // 1 point per 2 skills, capped at 10
+  const tier1Score = resumePresence + skillBreadth
+
+  // TIER 2: JOB MATCH (Role fit + Skill alignment + Experience signals) — 50 points max
+  let tier2Score = 0
+
+  if (hasJob && categoryCompatible) {
+    // Role category alignment: 10 points
+    const categoryBonus = resumeCategory === jobCategory ? 10 : resumeCategory === 'technical' ? 8 : 5
+
+    // Skill match as primary driver: 30 points
+    // Calculate as: (matched skills / total job skills) * 30
+    // Plus bonus if candidate has extra relevant skills
+    const jobSkillMatchPercent = matchedJobSkills.length / Math.max(jobSkills.length, 1)
+    const skillMatchScore = Math.round(jobSkillMatchPercent * 25)
+    const extraSkillBonus = Math.min(candidateSkills.length - jobSkills.length, 5) * 0.8 // 1 extra skill ≈ 0.8 points
+
+    // Experience signal alignment: 10 points
+    // Count relevant keywords (e.g., "led", "owned", "architected" for technical roles)
+    const experienceCount = experienceKeywords.filter((kw) => resumeLower.includes(kw)).length
+    const experienceSignalScore = Math.min(experienceCount * 1.2, 10)
+
+    tier2Score = categoryBonus + skillMatchScore + Math.min(extraSkillBonus, 5) + experienceSignalScore
+  } else if (hasJob && !categoryCompatible) {
+    // Hard fail: role mismatch is a blocker
+    tier2Score = 0
+  } else {
+    // No job description provided: base score on skill strength alone
+    tier2Score = Math.min(candidateSkills.length * 4, 35)
+  }
+
+  tier2Score = Math.min(tier2Score, 50) // Cap at 50
+
+  // TIER 3: EXTERNAL EVIDENCE (GitHub + LeetCode) — 25 points max
+  const githubScore = github ? Math.min(12, 6 + Math.floor((github.public_repos || repos.length) / 4)) : 0
+  const leetcodeScore = leetcode ? Math.min(13, 5 + Math.floor((leetcode.totalSolved || 0) / 20)) : 0
+  const tier3Score = githubScore + leetcodeScore
+
+  // FINAL SCORE: Sum all tiers, clamped to 0–100
+  const score = clamp(tier1Score + tier2Score + tier3Score)
+
+  // RECOMMENDATION THRESHOLDS
   const recommendation =
     hasJob && !categoryCompatible
       ? 'Not a role fit'
-      : score >= 78
+      : score >= 80
         ? 'Strong proceed'
-        : score >= 58
+        : score >= 60
           ? 'Proceed with focused screen'
           : 'Hold for manual review'
 
@@ -352,19 +401,23 @@ const calculateAssessment = ({ resumeText, github, repos, leetcode, jobText }) =
     resumeCategory,
     jobCategory,
     categoryCompatible,
+    tier1Score, // Foundation
+    tier2Score, // Job alignment
+    tier3Score, // External evidence
     risks: [
       hasJob && !categoryCompatible && `Role mismatch: resume appears ${resumeCategory}, while the job appears ${jobCategory}.`,
+      hasJob && matchedJobSkills.length === 0 && 'No skill overlap with the supplied job requirements.',
+      hasJob && matchedJobSkills.length < Math.ceil(jobSkills.length * 0.5) && `Skill match is weak: only ${matchedJobSkills.length}/${jobSkills.length} required skills found.`,
       !github && 'GitHub evidence is missing or unavailable.',
       !leetcode && 'LeetCode signal is not verified.',
       candidateSkills.length < 5 && 'Resume has limited explicit skill density.',
-      jobSkills.length > 0 && matchedJobSkills.length < Math.ceil(jobSkills.length / 2) && 'Job match is below the ideal threshold.',
     ].filter(Boolean),
     strengths: [
-      candidateSkills.length >= 6 && !hasJob && 'Broad technical skill coverage across the resume.',
-      candidateSkills.length >= 6 && hasJob && categoryCompatible && 'Broad technical skill coverage aligns with the supplied role.',
-      github && `${github.public_repos || repos.length} public repositories add portfolio evidence.`,
-      leetcode && `${leetcode.totalSolved} solved problems support problem-solving depth.`,
-      matchedJobSkills.length >= 4 && 'Candidate maps well to the target job requirements.',
+      candidateSkills.length >= 6 && 'Broad technical skill coverage detected.',
+      hasJob && categoryCompatible && matchedJobSkills.length >= Math.ceil(jobSkills.length * 0.8) && 'Strong skill alignment with the supplied job requirements.',
+      github && `${github.public_repos || repos.length} public repositories demonstrate hands-on portfolio work.`,
+      leetcode && `${leetcode.totalSolved} solved problems support problem-solving capability.`,
+      experienceKeywords.some((kw) => resumeLower.includes(kw)) && 'Resume shows leadership and ownership in delivery.',
     ].filter(Boolean),
   }
 }
