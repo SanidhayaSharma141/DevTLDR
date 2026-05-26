@@ -311,10 +311,17 @@ const parseResumeFile = async (file) => {
   return readFileAsText(file)
 }
 
-// Helper: Extract years of experience from resume (looks for date ranges)
+// Helper: Extract years of experience from resume (looks for date ranges in Professional Experience only)
 const extractYearsOfExperience = (resumeText) => {
+  // Extract ONLY the Professional Experience section, exclude Education section
+  const experienceMatch = resumeText.match(/(?:professional\s+experience|experience)([\s\S]*?)(?:(?:technical\s+skills|skills|education|projects|$))/i)
+  const experienceSection = experienceMatch ? experienceMatch[1] : ''
+  
+  if (!experienceSection) return 0
+  
+  // Find all date patterns in the experience section only
   const datePattern = /(\w+\s+\d{4})\s*–\s*(\w+\s+\d{4}|present)/gi
-  const matches = resumeText.match(datePattern) || []
+  const matches = experienceSection.match(datePattern) || []
   
   if (matches.length === 0) return 0
   
